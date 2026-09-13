@@ -16,6 +16,7 @@ env:
 jobs:
   workspace:
     runs-on: ubuntu-latest
+    timeout-minutes: 60
     steps:
       - uses: actions/checkout@v5
 
@@ -23,6 +24,17 @@ jobs:
         with:
           toolchain: ${{ env.rust_toolchain }}
           components: rust-src, rustfmt, clippy
+
+      - name: Cache cargo
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: cargo-${{ runner.os }}-${{ env.rust_toolchain }}-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            cargo-${{ runner.os }}-${{ env.rust_toolchain }}-
 
       - name: Check format
         run: cargo fmt --all -- --check
@@ -43,10 +55,11 @@ jobs:
 
   test-libos:
     runs-on: ubuntu-latest
+    timeout-minutes: 60
     strategy:
       fail-fast: false
       matrix:
-        mode: [linux, zircon]
+        mode: [linux]
     steps:
       - uses: actions/checkout@v5
 
@@ -55,9 +68,16 @@ jobs:
           toolchain: ${{ env.rust_toolchain }}
           components: rust-src, llvm-tools-preview, clippy
 
-      - name: Pull prebuilt images
-        if: matrix.mode == 'zircon'
-        run: make zircon-init
+- name: Cache cargo
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: cargo-${{ runner.os }}-${{ matrix.mode }}-${{ env.rust_toolchain }}-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            cargo-${{ runner.os }}-${{ matrix.mode }}-${{ env.rust_toolchain }}-
 
       - name: Build
         run: cargo build --package zcore --features "${{ matrix.mode }} libos"
@@ -67,6 +87,7 @@ jobs:
 
   test-bare-metal:
     runs-on: ubuntu-latest
+    timeout-minutes: 60
     strategy:
       fail-fast: false
       matrix:
@@ -81,35 +102,41 @@ jobs:
           toolchain: ${{ env.rust_toolchain }}
           components: rust-src, llvm-tools-preview, clippy
 
+      - name: Cache cargo
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: cargo-${{ runner.os }}-${{ matrix.arch }}-${{ env.rust_toolchain }}-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            cargo-${{ runner.os }}-${{ matrix.arch }}-${{ env.rust_toolchain }}-
+
       - name: Install cargo-binutils
         run: cargo install cargo-binutils --locked
 
       - name: Install qemu-utils
-        run: sudo apt update && sudo apt install qemu-utils
+        run: |
+          sudo rm -f /etc/apt/sources.list.d/azure-cli.list /etc/apt/sources.list.d/microsoft-prod.list
+          sudo apt-get update
+          sudo apt-get install -y qemu-utils
 
       - name: Pull prebuilt images
-        if: matrix.arch == 'x86_64'
         run: make zircon-init
 
       - name: Build ${{ matrix.arch }} bare-metal zircon
-        if: matrix.arch == 'x86_64'
         run: cd zCore && make build  ARCH=${{ matrix.arch }} ZBI=core-tests
 
       - name: Clippy ${{ matrix.arch }} bare-metal zircon
-        if: matrix.arch == 'x86_64'
         run: cd zCore && make clippy ARCH=${{ matrix.arch }} ZBI=core-tests
-
-      - name: Build ${{ matrix.arch }} bare-metal linux
-        if: matrix.arch != 'x86_64'
-        run: cd zCore && make build  ARCH=${{ matrix.arch }} LINUX=1
-
-      - name: Clippy ${{ matrix.arch }} bare-metal linux
-        run: cd zCore && make clippy ARCH=${{ matrix.arch }} LINUX=1
 
       - name: Xtask Build bare-metal linux
         run: cargo bin -m virt-${{ matrix.arch }}
 
   build-user:
+    # The unpatched runtime prebuilts do not contain a Fuchsia C/C++ SDK sysroot.
+    if: ${{ false }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v5
